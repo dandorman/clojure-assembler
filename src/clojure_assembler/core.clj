@@ -74,11 +74,14 @@
   (clojure.string/replace string #"[+|]" "\\\\$0"))
 
 (def a-command-re #"^@(?:([0-9]+)|([A-Za-z_][A-Za-z0-9_]*))")
+
 (def c-command-re (re-pattern (str "^([ADM]=)?"
                                    "(" (clojure.string/join "|" (map re-escape (keys comps))) ")"
                                    "(?:;("
                                    (clojure.string/join "|" (keys jumps))
                                    "))?$")))
+
+(def l-command-re #"\(([A-Za-z_][A-Za-z0-9_]*)\)")
 
 (defn strip-comments [line]
   (clojure.string/replace-first line #"//.*$" ""))
@@ -89,41 +92,54 @@
 (defn normalize [line]
   (remove-whitespace (strip-comments line)))
 
-(defn parse [asm symbols addr]
+(defn parse [asm line-number symbols addr]
   (let [line (normalize asm)
-        [_ a1 a2] (re-matches a-command-re line)
-        [_ dst cmp jmp] (re-matches c-command-re line)]
+        [_ addr-literal addr-label] (re-matches a-command-re line)
+        [_ dst cmp jmp] (re-matches c-command-re line)
+        [_ loop-label] (re-matches l-command-re line)]
     (cond
       (empty? line)
-      [nil symbols addr]
-      (or a1 a2)
-      [[:a (Integer/parseInt a1)] symbols addr]
+      [nil line-number symbols addr]
+
+      addr-literal
+      [[:a (Integer/parseInt addr-literal)] (inc line-number) symbols addr]
+
+      addr-label
+      (let [new-symbols (assoc symbols addr-label (get symbols addr-label addr))
+            new-addr (if (= addr (get new-symbols addr-label)) (inc addr) addr)]
+        [[:a addr-label] (inc line-number) new-symbols new-addr])
+
       cmp
-      [[:c cmp (str (first dst)) jmp] symbols addr])))
+      [[:c cmp (str (first dst)) jmp] (inc line-number) symbols addr]
+
+      loop-label
+      (let [new-symbols (assoc symbols loop-label line-number)]
+        [nil line-number new-symbols addr]))))
 
 (defn parse-lines
   ([lines]
-   (parse-lines lines [] predefined-symbols 0x10))
-  ([lines commands symbols addr]
+   (parse-lines lines [] 0 predefined-symbols 0x10))
+  ([lines commands line-number symbols addr]
    (if (empty? lines)
      [commands symbols]
-     (let [[command new-symbols new-addr] (parse (first lines) symbols addr)]
+     (let [[command new-line-number new-symbols new-addr] (parse (first lines) line-number symbols addr)]
        (parse-lines (rest lines)
                     (conj commands command)
+                    new-line-number
                     new-symbols
                     new-addr)))))
 
-(defmulti translate first)
-(defmethod translate :a [[_ address]]
-  (str "0" (cl-format nil "~15,'0b" address)))
-(defmethod translate :c [[_ comp dest jump]]
-  (str "111" (comps comp) (dests dest "000") (jumps jump "000")))
+(defmulti translate (fn [[command _] _] command))
+(defmethod translate :a [[_ address] symbols]
+  (str "0" (cl-format nil "~15,'0b" (get symbols address address))))
+(defmethod translate :c [[_ cmp dest jump] _]
+  (str "111" (comps cmp) (dests dest "000") (jumps jump "000")))
 (defmethod translate nil [_]
   nil)
 
 (defn -main []
   (let [asm (line-seq (java.io.BufferedReader. *in*))
-        [commands _] (parse-lines asm)]
-    (doseq [command commands]
-      (if-let [hack (translate command)]
+        [commands symbols] (parse-lines asm)]
+    (doseq [command (filter (comp not nil?) commands)]
+      (if-let [hack (translate command symbols)]
         (println hack)))))
