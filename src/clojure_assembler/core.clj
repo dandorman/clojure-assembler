@@ -92,29 +92,44 @@
 (defn normalize [line]
   (remove-whitespace (strip-comments line)))
 
-(defn parse [asm line-number symbols addr]
+(defn parse [asm commands line-number symbols addr]
   (let [line (normalize asm)
         [_ addr-literal addr-label] (re-matches a-command-re line)
         [_ dst cmp jmp] (re-matches c-command-re line)
         [_ loop-label] (re-matches l-command-re line)]
     (cond
       (empty? line)
-      [nil line-number symbols addr]
+      [commands
+       line-number
+       symbols
+       addr]
 
       addr-literal
-      [[:a (Integer/parseInt addr-literal)] (inc line-number) symbols addr]
+      [(conj commands [:a (Integer/parseInt addr-literal)])
+       (inc line-number)
+       symbols
+       addr]
 
       addr-label
       (let [new-symbols (assoc symbols addr-label (get symbols addr-label addr))
             new-addr (if (= addr (get new-symbols addr-label)) (inc addr) addr)]
-        [[:a addr-label] (inc line-number) new-symbols new-addr])
+        [(conj commands [:a addr-label])
+         (inc line-number)
+         new-symbols
+         new-addr])
 
       cmp
-      [[:c cmp (str (first dst)) jmp] (inc line-number) symbols addr]
+      [(conj commands [:c cmp (str (first dst)) jmp])
+       (inc line-number)
+       symbols
+       addr]
 
       loop-label
       (let [new-symbols (assoc symbols loop-label line-number)]
-        [nil line-number new-symbols addr]))))
+        [commands
+         line-number
+         new-symbols
+         addr]))))
 
 (defn parse-lines
   ([lines]
@@ -122,9 +137,9 @@
   ([lines commands line-number symbols addr]
    (if (empty? lines)
      [commands symbols]
-     (let [[command new-line-number new-symbols new-addr] (parse (first lines) line-number symbols addr)]
+     (let [[new-commands new-line-number new-symbols new-addr] (parse (first lines) commands line-number symbols addr)]
        (parse-lines (rest lines)
-                    (conj commands command)
+                    new-commands
                     new-line-number
                     new-symbols
                     new-addr)))))
@@ -134,12 +149,10 @@
   (str "0" (cl-format nil "~15,'0b" (get symbols address address))))
 (defmethod translate :c [[_ cmp dest jump] _]
   (str "111" (comps cmp) (dests dest "000") (jumps jump "000")))
-(defmethod translate nil [_]
-  nil)
 
 (defn -main []
   (let [asm (line-seq (java.io.BufferedReader. *in*))
         [commands symbols] (parse-lines asm)]
-    (doseq [command (filter (comp not nil?) commands)]
+    (doseq [command commands]
       (if-let [hack (translate command symbols)]
         (println hack)))))
