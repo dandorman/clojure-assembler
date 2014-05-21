@@ -73,15 +73,15 @@
 (defn re-escape [string]
   (clojure.string/replace string #"[+|]" "\\\\$0"))
 
-(def a-command-re #"^@(?:([0-9]+)|([A-Za-z_][A-Za-z0-9_]*))")
+(def a-command-re #"^@(?:([0-9]+)|([A-Za-z_:$.][A-Za-z0-9_:$.]*))")
 
-(def c-command-re (re-pattern (str "^([ADM]=)?"
+(def c-command-re (re-pattern (str "^(?:(" (clojure.string/join "|" (keys dests)) ")=)?"
                                    "(" (clojure.string/join "|" (map re-escape (keys comps))) ")"
                                    "(?:;("
                                    (clojure.string/join "|" (keys jumps))
                                    "))?$")))
 
-(def l-command-re #"\(([A-Za-z_][A-Za-z0-9_]*)\)")
+(def l-command-re #"\(([A-Za-z$.:_][A-Za-z0-9$.:_]*)\)")
 
 (defn strip-comments [line]
   (clojure.string/replace-first line #"//.*$" ""))
@@ -111,15 +111,20 @@
        addr]
 
       addr-label
-      (let [new-symbols (assoc symbols addr-label (get symbols addr-label addr))
-            new-addr (if (= addr (get new-symbols addr-label)) (inc addr) addr)]
+      (if (get predefined-symbols addr-label)
         [(conj commands [:a addr-label])
          (inc line-number)
-         new-symbols
-         new-addr])
+         symbols
+         addr]
+        (let [new-symbols (assoc symbols addr-label (get symbols addr-label addr))
+              new-addr (if (= addr (get new-symbols addr-label)) (inc addr) addr)]
+          [(conj commands [:a addr-label])
+           (inc line-number)
+           new-symbols
+           new-addr]))
 
       cmp
-      [(conj commands [:c cmp (str (first dst)) jmp])
+      [(conj commands [:c cmp dst jmp])
        (inc line-number)
        symbols
        addr]
@@ -134,15 +139,20 @@
 (defn parse-lines
   ([lines]
    (parse-lines lines [] 0 predefined-symbols 0x10))
-  ([lines commands line-number symbols addr]
-   (if (empty? lines)
-     [commands symbols]
-     (let [[new-commands new-line-number new-symbols new-addr] (parse (first lines) commands line-number symbols addr)]
-       (parse-lines (rest lines)
-                    new-commands
-                    new-line-number
-                    new-symbols
-                    new-addr)))))
+  ([initial-lines initial-commands initial-line-number initial-symbols initial-addr]
+   (loop [lines       initial-lines
+          commands    initial-commands
+          line-number initial-line-number
+          symbols     initial-symbols
+          addr        initial-addr]
+     (if (empty? lines)
+       [commands symbols]
+       (let [[new-commands new-line-number new-symbols new-addr] (parse (first lines) commands line-number symbols addr)]
+         (recur (rest lines)
+                new-commands
+                new-line-number
+                new-symbols
+                new-addr))))))
 
 (defmulti translate (fn [[command _] _] command))
 (defmethod translate :a [[_ address] symbols]
