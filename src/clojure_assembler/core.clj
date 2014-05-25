@@ -113,19 +113,18 @@
        addr]
 
       addr-label
-      (if (get predefined-symbols addr-label)
+      (if (get symbols addr-label)
         [(conj commands [:a addr-label])
          (inc line-number)
          symbols
          vars
          addr]
-        (let [new-symbols (assoc symbols addr-label (get symbols addr-label addr))
-              new-addr (if (= addr (get new-symbols addr-label)) (inc addr) addr)]
+        (let [new-vars (conj vars addr-label)]
           [(conj commands [:a addr-label])
            (inc line-number)
-           new-symbols
-           vars
-           new-addr]))
+           symbols
+           new-vars
+           addr]))
 
       cmp
       [(conj commands [:c cmp dst jmp])
@@ -135,11 +134,12 @@
        addr]
 
       loop-label
-      (let [new-symbols (assoc symbols loop-label line-number)]
+      (let [new-symbols (assoc symbols loop-label line-number)
+            new-vars (remove #(= loop-label %) vars)]
         [commands
          line-number
          new-symbols
-         vars
+         new-vars
          addr]))))
 
 (defn parse-lines
@@ -168,9 +168,17 @@
 (defmethod translate :c [[_ cmp dest jump] _]
   (str "111" (comps cmp) (dests dest "000") (jumps jump "000")))
 
+(defn revise-symbols [symbols vars]
+  (let [distinct-vars (distinct vars)
+        start-addr 0x10
+        end-attr   (+ start-addr (count distinct-vars))]
+    (merge symbols
+           (zipmap distinct-vars (range start-addr end-attr)))))
+
 (defn -main []
   (let [asm (line-seq (java.io.BufferedReader. *in*))
-        [commands symbols _] (parse-lines asm)]
+        [commands symbols vars] (parse-lines asm)
+        revised-symbols (revise-symbols symbols vars)]
     (doseq [command commands]
-      (if-let [hack (translate command symbols)]
+      (if-let [hack (translate command revised-symbols)]
         (println hack)))))
