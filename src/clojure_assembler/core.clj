@@ -92,7 +92,7 @@
 (defn normalize [line]
   (remove-whitespace (strip-comments line)))
 
-(defn parse [asm commands line-number symbols addr]
+(defn parse [asm commands line-number symbols vars addr]
   (let [line (normalize asm)
         [_ addr-literal addr-label] (re-matches a-command-re line)
         [_ dst cmp jmp] (re-matches c-command-re line)
@@ -102,12 +102,14 @@
       [commands
        line-number
        symbols
+       vars
        addr]
 
       addr-literal
       [(conj commands [:a (Integer/parseInt addr-literal)])
        (inc line-number)
        symbols
+       vars
        addr]
 
       addr-label
@@ -115,18 +117,21 @@
         [(conj commands [:a addr-label])
          (inc line-number)
          symbols
+         vars
          addr]
         (let [new-symbols (assoc symbols addr-label (get symbols addr-label addr))
               new-addr (if (= addr (get new-symbols addr-label)) (inc addr) addr)]
           [(conj commands [:a addr-label])
            (inc line-number)
            new-symbols
+           vars
            new-addr]))
 
       cmp
       [(conj commands [:c cmp dst jmp])
        (inc line-number)
        symbols
+       vars
        addr]
 
       loop-label
@@ -134,24 +139,27 @@
         [commands
          line-number
          new-symbols
+         vars
          addr]))))
 
 (defn parse-lines
   ([lines]
-   (parse-lines lines [] 0 predefined-symbols 0x10))
-  ([initial-lines initial-commands initial-line-number initial-symbols initial-addr]
+   (parse-lines lines [] 0 predefined-symbols [] 0x10))
+  ([initial-lines initial-commands initial-line-number initial-symbols initial-vars initial-addr]
    (loop [lines       initial-lines
           commands    initial-commands
           line-number initial-line-number
           symbols     initial-symbols
+          vars        initial-vars
           addr        initial-addr]
      (if (empty? lines)
-       [commands symbols]
-       (let [[new-commands new-line-number new-symbols new-addr] (parse (first lines) commands line-number symbols addr)]
+       [commands symbols vars]
+       (let [[new-commands new-line-number new-symbols new-vars new-addr] (parse (first lines) commands line-number symbols vars addr)]
          (recur (rest lines)
                 new-commands
                 new-line-number
                 new-symbols
+                new-vars
                 new-addr))))))
 
 (defmulti translate (fn [[command _] _] command))
@@ -162,7 +170,7 @@
 
 (defn -main []
   (let [asm (line-seq (java.io.BufferedReader. *in*))
-        [commands symbols] (parse-lines asm)]
+        [commands symbols _] (parse-lines asm)]
     (doseq [command commands]
       (if-let [hack (translate command symbols)]
         (println hack)))))
