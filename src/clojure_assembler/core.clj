@@ -1,5 +1,6 @@
 (ns clojure-assembler.core
-  (:use [clojure.pprint :only [cl-format]]))
+  (:use [clojure.pprint :only [cl-format]])
+  (:gen-class))
 
 (def comps {"0"   "0101010"
             "1"   "0111111"
